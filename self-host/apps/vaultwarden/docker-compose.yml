@@ -1,0 +1,21 @@
+```bash
+services:
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    restart: unless-stopped
+
+    user: "0:0"
+
+    environment:
+      DOMAIN: "https://vault.sws.com"
+      SIGNUPS_ALLOWED: "true"
+      SIGNUPS_DOMAINS_WHITELIST: "sws.com"
+
+    volumes:
+      - ./vw-data:/data
+
+    ports:
+      - "8060:80"
+
+      ```
