@@ -1,4 +1,4 @@
-```bash
+
 services:
   vaultwarden:
     image: vaultwarden/server:latest
@@ -16,6 +16,4 @@ services:
       - ./vw-data:/data
 
     ports:
-      - "8060:80"
-```
-   
+      - "8060:80" 
