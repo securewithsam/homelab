@@ -1,0 +1,59 @@
+# ============================================================
+# Apache Guacamole - Docker Compose (no license required)
+# Official guacamole/* images
+# ============================================================
+
+networks:
+  guacnet:
+    driver: bridge
+
+services:
+
+  guacd:
+    image: guacamole/guacd:latest
+    container_name: guacd
+    restart: unless-stopped
+    volumes:
+      - ./drive:/drive:rw
+      - ./record:/record:rw
+    networks:
+      - guacnet
+
+  db:
+    image: mariadb:10.11
+    container_name: guac_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "umFXcHgo5u5gXNP5hZEy!2"
+      MYSQL_DATABASE: "guacamole_db"
+      MYSQL_USER: "guacamole_user"
+      MYSQL_PASSWORD: "umFXcHgo5u5gXNP5hZEy!2"
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:z
+      - ./data:/var/lib/mysql
+    networks:
+      - guacnet
+
+  guacamole:
+    image: guacamole/guacamole:latest
+    container_name: guacamole
+    restart: unless-stopped
+    depends_on:
+      - db
+      - guacd
+    ports:
+      - "8080:8080"
+    environment:
+      GUACD_HOSTNAME: "guacd"
+      MYSQL_HOSTNAME: "db"
+      MYSQL_DATABASE: "guacamole_db"
+      MYSQL_USER: "guacamole_user"
+      MYSQL_PASSWORD: "umFXcHgo5u5gXNP5hZEy!2"
+      TOTP_ENABLED: "true"
+      WEBAPP_CONTEXT: "ROOT"
+      REMOTE_IP_VALVE_ENABLED: "true"   # needed if behind a reverse proxy
+    networks:
+      - guacnet
+
+volumes:
+  db-data:
