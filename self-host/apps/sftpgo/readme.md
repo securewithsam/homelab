@@ -11,7 +11,7 @@ mkdir -p data config backups
 sudo chown -R 1000:1000 data config backups
 
 chmod +x setup.sh
-sudo nano .env (edit with a rela secure password)
+sudo nano .env #edit with a real secure password
 ./setup.sh
 docker compose up -d
 ```
