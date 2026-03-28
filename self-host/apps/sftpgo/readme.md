@@ -1,5 +1,5 @@
-# 1. Copy all three files to your server
-# 2. Edit .env with a real password
+## 1. Copy all three files to your server
+## 2. Edit .env with a real password
 
 
 ```bash
@@ -16,5 +16,5 @@ docker compose up -d
 ```
 
 
-# 3. Hit http://<your-ip>:8099/web/admin
+## 3. http://<your-ip>:8099/web/admin
 
