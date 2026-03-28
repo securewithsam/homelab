@@ -1,4 +1,4 @@
-## 1. Copy all three files to your server
+## 1. Download the sftpgo.zip to your server 
 ## 2. Edit .env with a real password
 
 
