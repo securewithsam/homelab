@@ -1,8 +1,4 @@
 # SFTPGo Homelab — Security Hardening Documentation
-
-> **Version:** 1.0  
-> **Image:** `drakkan/sftpgo:v2.7.0`  
-> **Author:** Sam — Senior Security Manager  
 > **Last Updated:** March 2026
 
 ---
