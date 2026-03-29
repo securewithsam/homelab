@@ -1,6 +1,6 @@
 ###############################################################################
-# SFTPGo - Production Homelab Docker Compose
-# Web UI: http://<host>:8099
+# SFTPGo - Production Homelab Docker Compose (Master Config)
+# Web UI: http://<host>:8099/web/admin
 # SFTP:   ssh -p 2022 user@<host>
 # Docs:   https://docs.sftpgo.com/latest/
 ###############################################################################
@@ -16,11 +16,8 @@ services:
       - "8099:8099"
       # SFTP service
       - "2022:2022"
-      # Uncomment below if you need FTP/S or WebDAV
-      # - "2121:2121"    # FTP
-      # - "10080:10080"  # WebDAV
     volumes:
-      # SFTPGo data (user home dirs, uploads, etc.)
+      # SFTPGo data (user home dirs, uploads, virtual folders)
       - ./data:/srv/sftpgo
       # SFTPGo config + SQLite database
       - ./config:/var/lib/sftpgo
@@ -32,18 +29,41 @@ services:
       #---------------------------------------------------------------------------
       - SFTPGO_HTTPD__BINDINGS__0__PORT=8099
       - SFTPGO_HTTPD__BINDINGS__0__ADDRESS=0.0.0.0
-      # Enable both admin and client web UIs
       - SFTPGO_HTTPD__BINDINGS__0__ENABLE_WEB_ADMIN=true
       - SFTPGO_HTTPD__BINDINGS__0__ENABLE_WEB_CLIENT=true
       - SFTPGO_HTTPD__BINDINGS__0__ENABLE_REST_API=true
+
+      #---------------------------------------------------------------------------
+      # WEB UI HARDENING
+      #---------------------------------------------------------------------------
+      # Bind token to source IP (prevents session hijacking)
+      - SFTPGO_HTTPD__BINDINGS__0__SECURITY__ENABLED=true
+      # Hide login URL from unauthenticated users
+      - SFTPGO_HTTPD__BINDINGS__0__HIDE_LOGIN_URL=3
 
       #---------------------------------------------------------------------------
       # SFTP BINDING
       #---------------------------------------------------------------------------
       - SFTPGO_SFTPD__BINDINGS__0__PORT=2022
       - SFTPGO_SFTPD__BINDINGS__0__ADDRESS=0.0.0.0
-      # Max auth attempts before disconnect
+
+      #---------------------------------------------------------------------------
+      # SFTP HARDENING
+      #---------------------------------------------------------------------------
+      # Max auth attempts per connection before disconnect
       - SFTPGO_SFTPD__MAX_AUTH_TRIES=3
+      # Custom banner (don't leak version info)
+      - SFTPGO_SFTPD__BANNER=Welcome
+      # Secure key exchange algorithms only
+      - SFTPGO_SFTPD__KEX_ALGORITHMS=curve25519-sha256,curve25519-sha256@libssh.org,ecdh-sha2-nistp256,ecdh-sha2-nistp384,ecdh-sha2-nistp521
+      # Uncomment below to disable password auth and force SSH key only
+      # - SFTPGO_SFTPD__PASSWORD_AUTHENTICATION=false
+
+      #---------------------------------------------------------------------------
+      # DISABLE UNUSED PROTOCOLS (reduce attack surface)
+      #---------------------------------------------------------------------------
+      - SFTPGO_FTPD__BINDINGS__0__PORT=0
+      - SFTPGO_WEBDAVD__BINDINGS__0__PORT=0
 
       #---------------------------------------------------------------------------
       # DATA PROVIDER (SQLite — zero config, great for homelab)
@@ -51,53 +71,94 @@ services:
       - SFTPGO_DATA_PROVIDER__DRIVER=sqlite
       - SFTPGO_DATA_PROVIDER__NAME=/var/lib/sftpgo/sftpgo.db
       - SFTPGO_DATA_PROVIDER__CREATE_DEFAULT_ADMIN=true
-      # Set your initial admin credentials (change after first login!)
       - SFTPGO_DEFAULT_ADMIN_USERNAME=${SFTPGO_ADMIN_USER:-admin}
       - SFTPGO_DEFAULT_ADMIN_PASSWORD=${SFTPGO_ADMIN_PASS:-changeme_immediately}
+
+      #---------------------------------------------------------------------------
+      # PASSWORD HARDENING
+      #---------------------------------------------------------------------------
+      # Bcrypt cost factor (higher = slower brute force, 10 is default)
+      - SFTPGO_DATA_PROVIDER__PASSWORD_HASHING__BCRYPT_OPTIONS__COST=12
+      # Minimum password entropy for admins and users
+      - SFTPGO_DATA_PROVIDER__PASSWORD_VALIDATION__ADMINS__MIN_ENTROPY=50
+      - SFTPGO_DATA_PROVIDER__PASSWORD_VALIDATION__USERS__MIN_ENTROPY=50
 
       #---------------------------------------------------------------------------
       # BRUTE-FORCE DEFENDER (built-in fail2ban alternative)
       #---------------------------------------------------------------------------
       - SFTPGO_COMMON__DEFENDER__ENABLED=true
+      # Store defender data in database (persists across restarts)
+      - SFTPGO_COMMON__DEFENDER__DRIVER=provider
       # Ban duration in minutes
       - SFTPGO_COMMON__DEFENDER__BAN_TIME=30
       # Ban time multiplier after repeated offenses
       - SFTPGO_COMMON__DEFENDER__BAN_TIME_INCREMENT=50
-      # Failed attempts before ban
+      # Failed score threshold before ban
       - SFTPGO_COMMON__DEFENDER__THRESHOLD=5
       # Window to track failed attempts (minutes)
       - SFTPGO_COMMON__DEFENDER__OBSERVATION_TIME=15
+      # Score for valid username, wrong password
+      - SFTPGO_COMMON__DEFENDER__SCORE_VALID=1
+      # Score for non-existent username attempts
+      - SFTPGO_COMMON__DEFENDER__SCORE_INVALID=2
+      # Score for connect/disconnect without auth (scanners)
+      - SFTPGO_COMMON__DEFENDER__SCORE_NO_AUTH=2
+      # Score for exceeding rate limits or max connections
+      - SFTPGO_COMMON__DEFENDER__SCORE_LIMIT_EXCEEDED=3
+
+      #---------------------------------------------------------------------------
+      # CONNECTION LIMITS (feeds into defender scoring)
+      #---------------------------------------------------------------------------
+      # Max concurrent connections total (0 = unlimited)
+      - SFTPGO_COMMON__MAX_TOTAL_CONNECTIONS=50
+      # Max concurrent connections per IP
+      - SFTPGO_COMMON__MAX_PER_HOST_CONNECTIONS=10
+
+      #---------------------------------------------------------------------------
+      # RATE LIMITING
+      #---------------------------------------------------------------------------
+      # Average allowed requests per second
+      - SFTPGO_COMMON__RATE_LIMITERS__0__AVERAGE=100
+      # Max burst requests
+      - SFTPGO_COMMON__RATE_LIMITERS__0__BURST=50
+      # 1 = per source IP
+      - SFTPGO_COMMON__RATE_LIMITERS__0__TYPE=1
+      # Apply to all protocols
+      - SFTPGO_COMMON__RATE_LIMITERS__0__PROTOCOLS=SSH,HTTP,FTP,DAV
+      # Tie into defender for auto-banning repeat offenders
+      - SFTPGO_COMMON__RATE_LIMITERS__0__GENERATE_DEFENDER_EVENTS=true
+      # Memory limits for rate limiter entries
+      - SFTPGO_COMMON__RATE_LIMITERS__0__ENTRIES_SOFT_LIMIT=100
+      - SFTPGO_COMMON__RATE_LIMITERS__0__ENTRIES_HARD_LIMIT=150
 
       #---------------------------------------------------------------------------
       # UPLOAD / TRANSFER SETTINGS
       #---------------------------------------------------------------------------
-      # Max upload size per file (0 = unlimited) — set to 6GB for your 5GB+ need
+      # 0 = atomic with resume support (default, recommended)
       - SFTPGO_COMMON__UPLOAD_MODE=0
       # Idle timeout in minutes
       - SFTPGO_COMMON__IDLE_TIMEOUT=15
 
-      #---------------------------------------------------------------------------
-      # TELEMETRY (optional — Prometheus metrics)
-      #---------------------------------------------------------------------------
-      # Uncomment to expose metrics on port 10000
-      # - SFTPGO_TELEMETRY__BIND_PORT=10000
-      # - SFTPGO_TELEMETRY__BIND_ADDRESS=0.0.0.0
-
     # Graceful shutdown — give active transfers time to finish
     stop_grace_period: 60s
-    # Resource limits (adjust to your VPS/homelab specs)
+
+    # Resource limits (adjust to your homelab specs)
     deploy:
       resources:
         limits:
           memory: 512M
         reservations:
           memory: 128M
+
+    # Health check
     healthcheck:
       test: ["CMD", "sftpgo", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
+    # Log rotation
     logging:
       driver: "json-file"
       options:
