@@ -48,6 +48,11 @@ services:
       - SFTPGO_SFTPD__BINDINGS__0__ADDRESS=0.0.0.0
 
       #---------------------------------------------------------------------------
+      # ALLOW LIST (drops all connections not in the list)
+      #---------------------------------------------------------------------------
+      - SFTPGO_COMMON__ALLOWLIST_STATUS=0
+
+      #---------------------------------------------------------------------------
       # SFTP HARDENING
       #---------------------------------------------------------------------------
       # Max auth attempts per connection before disconnect
