@@ -31,17 +31,21 @@ newgrp docker
 Copy the example environment file and update the values:
 
 ```bash
-cp .env.example .env
-nano .env
+sudo nano .env
 ```
 
-Example `.env` content:
-
 ```env
+
+# Database configuration
 WP_DB_NAME=ectestwp-db
 WP_DB_USER=ectestwp-user
-WP_DB_PASSWORD=Str0ngP@ssw0rd!
+WP_DB_PASSWORD=ckKTvKh9gvspXBRJK955
+MYSQL_RANDOM_ROOT_PASSWORD=yes
+
+#Wordpress port
+
 WORDPRESS_PORT=8085
+
 ```
 
 ### 2. Secure the `.env` File
