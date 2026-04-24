@@ -2,7 +2,7 @@
 
 **One-time DB init before first run:**
 ```bash
-mkdir -p ./init
+sudo chown -R infra-admin:infra-admin ./init
 docker run --rm guacamole/guacamole:latest \
   /opt/guacamole/bin/initdb.sh --mysql > ./init/initdb.sql
 ```
