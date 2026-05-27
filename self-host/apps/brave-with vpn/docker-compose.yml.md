@@ -10,6 +10,7 @@ services:
       - VPN_SERVICE_PROVIDER=surfshark
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=your-private-key-here
+      - WIREGUARD_ADDRESSES=10.14.0.2/16
       - SERVER_COUNTRIES=Canada
       - SERVER_CITIES=Vancouver
       - TZ=America/Toronto
@@ -35,3 +36,15 @@ volumes:
   brave-bc-data:
 
   ```
+
+
+```yml
+
+docker compose down
+docker compose up -d
+docker compose logs -f gluetun
+```
+
+
+
+
