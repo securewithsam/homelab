@@ -4,7 +4,7 @@ Isolated Brave browser instances exiting through different VPN geolocations for 
 
 ## Why This Exists
 
-The marketing team needs to test the website from different geographic locations (provinces, countries) to verify geo-targeted content, regional pricing, CDN behavior, and localization. Corporate policy blocks third-party VPN clients on endpoints, so this stack provides isolated browser sessions that exit through Surfshark VPN — accessible from any browser on the corporate network with zero client-side software.
+If a team needs to test the website from different geographic locations (provinces, countries) to verify geo-targeted content, regional pricing, CDN behavior, and localization. Corporate policy blocks third-party VPN clients on endpoints, so this stack provides isolated browser sessions that exit through Surfshark VPN — accessible from any browser on the corporate network with zero client-side software.
 
 ## Architecture
 
