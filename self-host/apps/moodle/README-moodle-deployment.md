@@ -1,53 +1,55 @@
-# Moodle 5.2 HomeLab Deployment Runbook
+# Moodle 5.2 Production Deployment Guide
 
-This runbook documents the working Moodle deployment built and tested on the HomeLab Ubuntu server, including the fixes encountered during installation.
+Production deployment runbook for Moodle 5.2 using Docker Compose, PostgreSQL, PHP/Apache, and Pangolin as the external HTTPS reverse proxy.
 
-## 1. Target architecture
+> **Deployment model:** Application code is built into an immutable container image. PostgreSQL and Moodle data are persistent. PostgreSQL remains private. Moodle is published externally only through the reverse-proxy path.
 
-- Ubuntu Docker host: `10.0.100.51`
-- Application directory: `/data/apps/moodle`
-- Moodle: `5.2.3`
-- PHP: `8.3` + Apache
-- PostgreSQL: `16`
-- Moodle origin port: `9999`
-- Public URL: `https://lms.sws.ca`
-- Public access: Pangolin reverse proxy/tunnel
-- Database is Docker-internal only; PostgreSQL port 5432 is not published to the host.
-- Moodle code is baked into the image.
-- `moodledata`, PostgreSQL data, PHP configuration, and Moodle `config.php` persist outside the application container.
+---
 
-Traffic flow:
+## 1. Architecture
 
 ```text
-Internet/User
-    |
-    | HTTPS 443
-    v
+User / Browser
+      |
+      | HTTPS 443
+      v
 https://lms.sws.ca
-    |
-    v
+      |
+      v
 Pangolin
-    |
-    | HTTP
-    v
-10.0.100.51:9999
-    |
-    v
-Moodle container
-    |
-    +---- PostgreSQL (private Docker network)
+      |
+      | HTTP :9999
+      v
+Moodle Server
+      |
+      +--> Moodle 5.2.3 / PHP 8.3 / Apache
+      |
+      +--> PostgreSQL 16
+           Private Docker network
 ```
+
+### Deployment parameters
+
+| Component | Value |
+|---|---|
+| Application directory | `/data/apps/moodle` |
+| Moodle | `5.2.3` |
+| PHP | `8.3` |
+| PostgreSQL | `16` |
+| Moodle origin port | `9999` |
+| Public URL | `https://lms.sws.ca` |
+| Application image | `sws-moodle:5.2.3` |
+
+---
 
 ## 2. Prerequisites
 
-Verify Docker and Docker Compose:
+Verify Docker Engine and Docker Compose:
 
 ```bash
 docker --version
 docker compose version
 ```
-
-The tested lab had Docker 29.3.0 and Docker Compose v5.1.0.
 
 Create the application directories:
 
@@ -59,37 +61,48 @@ sudo mkdir -p moodledata postgres
 sudo chown -R "$USER":"$USER" /data/apps/moodle
 ```
 
-## 3. Create `.env`
+---
+
+## 3. Environment File
+
+Create the environment file:
 
 ```bash
+cd /data/apps/moodle
 nano .env
 ```
 
-Example:
+Add:
 
 ```dotenv
 POSTGRES_DB=moodle
 POSTGRES_USER=moodle
-POSTGRES_PASSWORD=CHANGE_ME_TO_A_STRONG_PASSWORD
+POSTGRES_PASSWORD=<STRONG_UNIQUE_DATABASE_PASSWORD>
 
 MOODLE_ADMIN_USER=moodleadmin
-MOODLE_ADMIN_PASSWORD=CHANGE_ME
-MOODLE_ADMIN_EMAIL=admin@example.com
+MOODLE_ADMIN_PASSWORD=<STRONG_UNIQUE_ADMIN_PASSWORD>
+MOODLE_ADMIN_EMAIL=<ADMIN_EMAIL>
 
 MOODLE_PORT=9999
 ```
 
-Protect it:
+Protect the file:
 
 ```bash
 chmod 600 .env
 ```
 
-Do not commit `.env` or production secrets to Git.
+> Do not commit `.env` or production credentials to Git.
 
-## 4. Create the Moodle Docker image
+---
 
-Create `/data/apps/moodle/Dockerfile`:
+## 4. Moodle Docker Image
+
+Create `Dockerfile`:
+
+```bash
+nano Dockerfile
+```
 
 ```dockerfile
 FROM php:8.3-apache
@@ -144,29 +157,33 @@ RUN sed -ri \
 WORKDIR /var/www/moodle
 ```
 
-Build it:
+Build the image:
 
 ```bash
-cd /data/apps/moodle
-
 docker build \
   --build-arg MOODLE_VERSION=5.2.3 \
-  -t homelab-moodle:5.2.3 .
+  -t sws-moodle:5.2.3 .
 ```
 
 Verify:
 
 ```bash
-docker images | grep homelab-moodle
+docker images | grep sws-moodle
 ```
 
-## 5. Create PHP configuration
+---
 
-Create `/data/apps/moodle/moodle.ini`:
+## 5. PHP Configuration
+
+Create:
+
+```bash
+nano moodle.ini
+```
+
+Add:
 
 ```ini
-; Moodle production PHP configuration
-
 zend.exception_ignore_args = On
 
 max_input_vars = 5000
@@ -189,11 +206,97 @@ display_errors = Off
 log_errors = On
 ```
 
-The 1 GB upload limit was selected to allow larger SCORM/course packages.
+The 1 GB request/upload limit accommodates larger SCORM and course packages.
 
-## 6. Create Docker Compose
+---
 
-Create `/data/apps/moodle/compose.yml`:
+## 6. Moodle Configuration
+
+Create:
+
+```bash
+nano config.php
+```
+
+Add:
+
+```php
+<?php
+
+unset($CFG);
+global $CFG;
+$CFG = new stdClass();
+
+$CFG->dbtype    = 'pgsql';
+$CFG->dblibrary = 'native';
+$CFG->dbhost    = 'postgres';
+$CFG->dbname    = 'moodle';
+$CFG->dbuser    = 'moodle';
+$CFG->dbpass    = '<DATABASE_PASSWORD>';
+$CFG->prefix    = 'mdl_';
+
+$CFG->dboptions = array (
+  'dbpersist' => 0,
+  'dbport' => 5432,
+  'dbsocket' => '',
+);
+
+$CFG->wwwroot  = 'https://lms.sws.ca';
+$CFG->sslproxy = true;
+
+$CFG->dataroot = '/var/www/moodledata';
+$CFG->admin    = 'admin';
+
+$CFG->directorypermissions = 0770;
+
+require_once(__DIR__ . '/lib/setup.php');
+```
+
+Set the required ownership and permissions:
+
+```bash
+sudo chown root:33 config.php
+sudo chmod 640 config.php
+```
+
+Verify:
+
+```bash
+ls -ln config.php
+```
+
+Expected ownership:
+
+```text
+UID: 0
+GID: 33
+Mode: 640
+```
+
+---
+
+## 7. Moodle Data Directory
+
+Set ownership and permissions:
+
+```bash
+sudo chown -R 33:33 /data/apps/moodle/moodledata
+sudo chmod -R 770 /data/apps/moodle/moodledata
+```
+
+`moodledata` must remain outside Moodle's public web root.
+
+---
+
+## 8. Docker Compose
+
+Create:
+
+```bash
+nano compose.yml
+```
+
+Add:
 
 ```yaml
 services:
@@ -222,7 +325,7 @@ services:
       start_period: 20s
 
   moodle:
-    image: homelab-moodle:5.2.3
+    image: sws-moodle:5.2.3
     container_name: moodle-app
     restart: unless-stopped
 
@@ -246,29 +349,27 @@ networks:
     driver: bridge
 ```
 
-### Important: local Moodle image
-
-`homelab-moodle:5.2.3` is locally built, so do **not** use a generic:
-
-```bash
-docker compose pull
-```
-
-That causes Docker to try to pull `homelab-moodle:5.2.3` from a public registry.
-
-Pull PostgreSQL specifically:
+Pull PostgreSQL:
 
 ```bash
 docker compose pull postgres
 ```
 
-Then start:
+The Moodle application image is built locally, so a generic `docker compose pull` is not required.
+
+---
+
+## 9. Start Moodle
+
+Start the platform:
 
 ```bash
+cd /data/apps/moodle
+
 docker compose up -d
 ```
 
-Verify:
+Check status:
 
 ```bash
 docker compose ps
@@ -276,119 +377,28 @@ docker compose ps
 
 Expected:
 
-- `moodle-postgres` healthy
-- `moodle-app` running
-- Host port `9999` mapped to container port `80`
+```text
+moodle-postgres   Up (healthy)
+moodle-app        Up
+```
 
-Test the origin:
+The application should be published locally on:
+
+```text
+http://<MOODLE_SERVER_IP>:9999
+```
+
+Verify the origin:
 
 ```bash
 curl -I http://127.0.0.1:9999
 ```
 
-During initial installation, a redirect to `install.php` is expected.
+---
 
-## 7. Fix `moodledata` permissions
+## 10. Validate Persistent Permissions
 
-If the Moodle installer reports that the data directory cannot be created or written:
-
-```bash
-cd /data/apps/moodle
-
-sudo chown -R 33:33 moodledata
-sudo chmod -R 770 moodledata
-```
-
-Validate from the container:
-
-```bash
-docker exec moodle-app bash -c \
-'id www-data && ls -ld /var/www/moodledata && touch /var/www/moodledata/testfile && rm /var/www/moodledata/testfile'
-```
-
-## 8. Moodle database installer settings
-
-Use:
-
-```text
-Database driver: PostgreSQL
-Database host:   postgres
-Database name:   moodle
-Database user:   moodle
-Database port:   5432
-Tables prefix:   mdl_
-Unix socket:     blank
-```
-
-Use the actual `POSTGRES_PASSWORD` from `.env`.
-
-**Do not use `localhost` as the database host.** `postgres` is the Docker Compose service name and resolves across the private Docker network.
-
-## 9. Moodle `config.php`
-
-The Moodle installer may be unable to write `config.php` because the application code is intentionally not writable by Apache.
-
-Create it manually on the host:
-
-```bash
-cd /data/apps/moodle
-sudo nano config.php
-```
-
-Working structure:
-
-```php
-<?php
-
-unset($CFG);
-global $CFG;
-$CFG = new stdClass();
-
-$CFG->dbtype    = 'pgsql';
-$CFG->dblibrary = 'native';
-$CFG->dbhost    = 'postgres';
-$CFG->dbname    = 'moodle';
-$CFG->dbuser    = 'moodle';
-$CFG->dbpass    = 'CHANGE_ME_TO_ACTUAL_DB_PASSWORD';
-$CFG->prefix    = 'mdl_';
-
-$CFG->dboptions = array (
-  'dbpersist' => 0,
-  'dbport' => 5432,
-  'dbsocket' => '',
-);
-
-$CFG->wwwroot  = 'https://lms.sws.ca';
-$CFG->sslproxy = true;
-
-$CFG->dataroot = '/var/www/moodledata';
-$CFG->admin    = 'admin';
-
-$CFG->directorypermissions = 0770;
-
-require_once(__DIR__ . '/lib/setup.php');
-```
-
-Protect it while allowing Apache/PHP (`www-data`, GID 33) to read it:
-
-```bash
-sudo chown root:33 config.php
-sudo chmod 640 config.php
-```
-
-Verify numerically:
-
-```bash
-ls -ln config.php
-```
-
-Expected ownership/mode similar to:
-
-```text
--rw-r----- 1 0 33 ... config.php
-```
-
-Validate that `www-data` can read it:
+Confirm that Moodle can read `config.php`:
 
 ```bash
 docker exec -u www-data moodle-app \
@@ -401,75 +411,87 @@ Expected:
 READABLE
 ```
 
-## 10. Important fix: HTTP 500 after container recreation
-
-### Symptom
-
-Moodle returned HTTP 500 after:
+Confirm that Moodle can write to `moodledata`:
 
 ```bash
-docker compose up -d --force-recreate moodle
+docker exec moodle-app bash -c \
+'id www-data && ls -ld /var/www/moodledata && touch /var/www/moodledata/testfile && rm /var/www/moodledata/testfile'
 ```
 
-Logs showed errors similar to:
+---
+
+## 11. Database Configuration
+
+When configuring Moodle, use:
+
+| Setting | Value |
+|---|---|
+| Database driver | PostgreSQL |
+| Database host | `postgres` |
+| Database name | `moodle` |
+| Database user | `moodle` |
+| Database password | Value of `POSTGRES_PASSWORD` |
+| Database port | `5432` |
+| Tables prefix | `mdl_` |
+| Unix socket | Blank |
+
+The database hostname is `postgres` because Moodle and PostgreSQL communicate through the private Docker network.
+
+Do not use `localhost`.
+
+---
+
+## 12. Pangolin Reverse Proxy
+
+Create the public resource in Pangolin:
 
 ```text
-require_once(/var/www/moodle/config.php): Failed to open stream: Permission denied
-Fatal error: Failed opening required '/var/www/moodle/public/../config.php'
+Public hostname: https://lms.sws.ca
+
+Origin protocol: HTTP
+Origin target:   <MOODLE_SERVER_IP>
+Origin port:     9999
 ```
 
-Inside the container, `config.php` appeared as:
+The resulting flow is:
 
 ```text
--rw------- 1 1000 1000 ...
+https://lms.sws.ca
+        |
+        | HTTPS
+        v
+     Pangolin
+        |
+        | HTTP :9999
+        v
+   Moodle Server
 ```
 
-### Cause
+Moodle must use the external HTTPS hostname as its canonical URL:
 
-`config.php` is a host bind mount:
-
-```yaml
-- ./config.php:/var/www/moodle/config.php:ro
+```php
+$CFG->wwwroot  = 'https://lms.sws.ca';
+$CFG->sslproxy = true;
 ```
 
-Therefore, the **host file's ownership and permissions control access**. A previous `chown` performed only inside the container does not solve the problem after the container is recreated.
+Use the public FQDN for normal user and administrator access:
 
-### Permanent fix
-
-Run on the host:
-
-```bash
-cd /data/apps/moodle
-
-sudo chown root:33 config.php
-sudo chmod 640 config.php
+```text
+https://lms.sws.ca
 ```
 
-Then:
+---
 
-```bash
-docker exec -u www-data moodle-app \
-  php -r 'echo is_readable("/var/www/moodle/config.php") ? "READABLE\n" : "NOT READABLE\n";'
-```
+## 13. Validate PHP Configuration
 
-No image rebuild or database reinstall is required for this issue.
-
-## 11. Verify PHP settings
-
-After mounting `moodle.ini`, recreate the Moodle container if needed:
-
-```bash
-docker compose up -d --force-recreate moodle
-```
-
-Check:
+Run:
 
 ```bash
 docker exec moodle-app php -i | grep -E \
 "zend.exception_ignore_args|max_input_vars|upload_max_filesize|post_max_size|memory_limit"
 ```
 
-Expected values:
+Expected:
 
 ```text
 max_input_vars => 5000 => 5000
@@ -479,226 +501,173 @@ upload_max_filesize => 1024M => 1024M
 zend.exception_ignore_args => On => On
 ```
 
-## 12. Pangolin public resource
+---
 
-Create the Pangolin public resource with the Moodle server as the origin:
+## 14. Deployment Validation
 
-```text
-Protocol: HTTP
-Target:   10.0.100.51
-Port:     9999
-```
-
-Public hostname:
-
-```text
-https://lms.sws.ca
-```
-
-Pangolin terminates HTTPS externally and proxies HTTP to the Moodle origin.
-
-### Moodle canonical URL fix
-
-Initially Moodle used:
-
-```php
-$CFG->wwwroot = 'http://10.0.100.51:9999';
-```
-
-This caused users visiting the public subdomain to be redirected back to:
-
-```text
-http://10.0.100.51:9999/login/index.php
-```
-
-The fix was:
-
-```php
-$CFG->wwwroot  = 'https://lms.sws.ca';
-$CFG->sslproxy = true;
-```
-
-After this change, Moodle correctly remains on the public HTTPS hostname.
-
-Normal user access should therefore use:
-
-```text
-https://lms.sws.ca
-```
-
-Do not use the private IP/port as the normal Moodle browser URL after setting the canonical public URL.
-
-## 13. Troubleshooting commands
-
-Container status:
+### Containers
 
 ```bash
-cd /data/apps/moodle
 docker compose ps
 ```
 
-Moodle logs:
-
-```bash
-docker compose logs --tail=100 moodle
-```
-
-PostgreSQL logs:
-
-```bash
-docker compose logs --tail=100 postgres
-```
-
-Follow Moodle logs:
-
-```bash
-docker compose logs -f moodle
-```
-
-Test local origin:
-
-```bash
-curl -I http://127.0.0.1:9999
-```
-
-Test LAN origin:
-
-```bash
-curl -I http://10.0.100.51:9999
-```
-
-Test public endpoint:
-
-```bash
-curl -I https://lms.sws.ca
-```
-
-Inspect redirect chain:
-
-```bash
-curl -IL https://lms.sws.ca
-```
-
-Check Moodle config permissions:
-
-```bash
-ls -ln /data/apps/moodle/config.php
-
-docker exec moodle-app ls -ln /var/www/moodle/config.php
-```
-
-Check DB health:
+### PostgreSQL
 
 ```bash
 docker exec moodle-postgres \
   pg_isready -U moodle -d moodle
 ```
 
-## 14. Useful lifecycle commands
+### Local origin
 
-Start:
+```bash
+curl -I http://127.0.0.1:9999
+```
+
+### Public endpoint
+
+```bash
+curl -I https://lms.sws.ca
+```
+
+### Redirect chain
+
+```bash
+curl -IL https://lms.sws.ca
+```
+
+All browser-facing redirects should remain on the public FQDN.
+
+---
+
+## 15. Operational Commands
+
+### Start
 
 ```bash
 cd /data/apps/moodle
 docker compose up -d
 ```
 
-Stop containers without deleting persistent data:
+### Status
 
 ```bash
-docker compose stop
+docker compose ps
 ```
 
-Restart Moodle:
+### Moodle logs
+
+```bash
+docker compose logs --tail=100 moodle
+```
+
+### PostgreSQL logs
+
+```bash
+docker compose logs --tail=100 postgres
+```
+
+### Follow Moodle logs
+
+```bash
+docker compose logs -f moodle
+```
+
+### Restart Moodle
 
 ```bash
 docker compose restart moodle
 ```
 
-Recreate Moodle after a Compose configuration change:
+### Recreate Moodle after configuration changes
 
 ```bash
 docker compose up -d --force-recreate moodle
 ```
 
-Rebuild the Moodle image after a Dockerfile change:
+### Rebuild after Dockerfile changes
 
 ```bash
 docker build \
   --build-arg MOODLE_VERSION=5.2.3 \
-  -t homelab-moodle:5.2.3 .
+  -t sws-moodle:5.2.3 .
 
 docker compose up -d --force-recreate moodle
 ```
 
-## 15. Current security design
+---
 
-The deployment intentionally follows these principles:
+## 16. Production Security Baseline
 
-- Only Moodle's origin HTTP port is published.
-- PostgreSQL is not exposed to the LAN/Internet.
-- Application and database communicate on a private Docker network.
-- Moodle application source is baked into the container image.
-- `config.php` is mounted read-only into the application container.
-- `config.php` is root-owned and readable by the web-server group only.
-- `moodledata` is outside the public Moodle web root.
-- Public TLS terminates at Pangolin.
-- Moodle uses its HTTPS public FQDN as `$CFG->wwwroot`.
-- `$CFG->sslproxy = true` tells Moodle that HTTPS is being handled by the reverse proxy.
-- PHP error display is disabled while logging remains enabled.
+- PostgreSQL is available only on the private Docker network.
+- PostgreSQL port `5432` is not published to the host.
+- Only the Moodle origin port required by Pangolin is exposed.
+- Restrict TCP `9999` to the Pangolin path at the host/network layer where possible.
+- `moodledata` resides outside the public Moodle web root.
+- `config.php` is mounted read-only into the Moodle container.
+- `config.php` is root-owned and readable only by the required web-server group.
+- `.env` is excluded from source control and protected with restrictive permissions.
+- Production deployments use unique secrets.
+- TLS terminates at Pangolin.
+- Moodle uses the external HTTPS FQDN as its canonical URL.
+- PHP error display is disabled.
+- Application and reverse-proxy logs should be centrally retained and monitored.
+- Backups must include PostgreSQL, `moodledata`, Moodle configuration, and deployment configuration.
+- Restore procedures must be tested before production go-live.
+- Maintain a protected local break-glass administrator when enterprise SSO is enabled.
 
-## 16. Items still to complete before treating this as the final enterprise build
+---
 
-This README captures the **working state reached so far**. The following were not yet completed/tested and should not be assumed to be production-ready:
+## 17. Production Readiness
 
-1. Resolve Moodle 5.2 Composer/vendor check in the Docker image.
-2. Configure and validate the Moodle 5.2 router with Apache.
-3. Complete the Moodle installation and validate health checks.
-4. Add Moodle cron running every minute.
-5. Add Redis for Moodle cache/session use.
-6. Upload and validate representative SCORM packages.
-7. Configure Microsoft Entra ID SSO/OIDC.
-8. Retain and protect a local break-glass Moodle administrator.
-9. Configure trusted reverse-proxy settings as required.
-10. Implement database and `moodledata` backups and perform a restore test.
-11. Add container/log rotation, monitoring, health checks, and alerting.
-12. Pin production container/image versions and establish an upgrade process.
-13. Review firewall rules so port 9999 is reachable only where required (ideally only from the Pangolin path).
-14. Validate production sizing/concurrency for the expected user population.
-15. Perform security hardening and application testing before enterprise deployment.
+Before enterprise go-live, validate:
 
-## 17. Deployment checklist for the next server
+- [ ] Moodle installation completes without blocking environment checks.
+- [ ] Moodle 5.2 Apache/router configuration is validated for the final release.
+- [ ] Required Composer/vendor dependencies are included in the final application image.
+- [ ] Moodle cron runs every minute.
+- [ ] Redis is configured for production cache/session use if included in the final architecture.
+- [ ] Representative SCORM packages upload and execute successfully.
+- [ ] SCORM completion tracking and reporting are validated.
+- [ ] Microsoft Entra ID SSO/OIDC is configured.
+- [ ] MFA and Conditional Access requirements are applied.
+- [ ] Local break-glass administrative access is tested.
+- [ ] PostgreSQL backup and restore are tested.
+- [ ] `moodledata` backup and restore are tested.
+- [ ] Container and application log rotation is configured.
+- [ ] Health monitoring and alerting are configured.
+- [ ] Vulnerability scanning and security validation are completed.
+- [ ] Capacity and concurrency testing match the expected production population.
+- [ ] Patch and upgrade procedures are documented and tested.
+
+---
+
+## 18. Final Verification
 
 ```text
-[ ] Install/verify Docker + Compose
-[ ] Create /data/apps/moodle
-[ ] Create moodledata and postgres directories
-[ ] Create protected .env with NEW environment-specific secrets
-[ ] Create Dockerfile
-[ ] Build homelab-moodle:5.2.3 (or approved newer version)
-[ ] Create moodle.ini
-[ ] Create compose.yml
-[ ] Pull PostgreSQL image
-[ ] Start PostgreSQL + Moodle
-[ ] Fix moodledata ownership (UID/GID 33 where applicable)
-[ ] Configure Moodle PostgreSQL connection using host "postgres"
-[ ] Create config.php
-[ ] Set config.php root:33 / 640
-[ ] Confirm config.php is readable by www-data
-[ ] Set environment's canonical HTTPS FQDN in $CFG->wwwroot
-[ ] Set $CFG->sslproxy = true when TLS terminates at Pangolin
-[ ] Configure Pangolin HTTP origin -> server:9999
-[ ] Validate local origin
-[ ] Validate public HTTPS URL
-[ ] Validate redirect chain
-[ ] Review Moodle server checks
-[ ] Complete remaining production-hardening items
+[ ] PostgreSQL container healthy
+[ ] Moodle container healthy/running
+[ ] PostgreSQL not externally exposed
+[ ] config.php ownership = root:33
+[ ] config.php permissions = 640
+[ ] config.php readable by www-data
+[ ] moodledata writable by Moodle
+[ ] moodledata not web accessible
+[ ] Public HTTPS FQDN loads successfully
+[ ] Redirects remain on public FQDN
+[ ] PHP limits validated
+[ ] Pangolin origin configured correctly
+[ ] Administrative access tested
+[ ] SSO tested
+[ ] SCORM tested
+[ ] Cron validated
+[ ] Backups validated
+[ ] Restore tested
+[ ] Monitoring and alerting validated
 ```
 
 ---
 
-## Key lesson from this build
+## Deployment Principle
 
-For this Docker design, treat `/data/apps/moodle/config.php` as the authoritative configuration file. Because it is bind-mounted read-only into the Moodle container, its **host ownership and permissions persist across container recreation**.
-
-For reverse-proxy deployment, Moodle's `$CFG->wwwroot` must be the **public canonical HTTPS URL**, not the private Docker/LAN origin address.
+> **Build once, keep application code immutable, persist only required data and configuration, expose only the reverse-proxied application path, and use the public HTTPS FQDN as Moodle's canonical identity.**
