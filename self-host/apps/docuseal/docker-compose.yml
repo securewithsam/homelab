@@ -1,0 +1,38 @@
+services:
+  app:
+    image: docuseal/docuseal:latest
+    container_name: docuseal
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    ports:
+      - "10.0.100.51:3005:3000"
+
+    volumes:
+      - ./docuseal:/data/docuseal
+
+    environment:
+      FORCE_SSL: "true"
+      DATABASE_URL: postgresql://docuseal:${DB_PASSWORD}@postgres:5432/docuseal
+
+  postgres:
+    image: postgres:18
+    container_name: docuseal-postgres
+    restart: unless-stopped
+
+    volumes:
+      - ./pg_data:/var/lib/postgresql/18/docker
+
+    environment:
+      POSTGRES_USER: docuseal
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: docuseal
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U docuseal -d docuseal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
