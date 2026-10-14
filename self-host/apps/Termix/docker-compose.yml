@@ -1,4 +1,4 @@
-```sh
+
 services:
   termix:
     image: ghcr.io/lukegus/termix:latest
@@ -27,4 +27,4 @@ services:
 networks:
   termix-net:
     driver: bridge
-```
+
